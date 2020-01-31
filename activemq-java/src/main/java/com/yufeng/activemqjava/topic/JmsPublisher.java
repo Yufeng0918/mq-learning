@@ -19,11 +19,13 @@ public class JmsPublisher {
 
         ConnectionFactory connectionFactory = new ActiveMQSslConnectionFactory(ACTIVEMQ_URL);
         Connection connection = connectionFactory.createConnection();
-        connection.start();
+
 
         Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
         Topic destination = session.createTopic(TOPIC_NAME);
         MessageProducer messageProducer = session.createProducer(destination);
+        messageProducer.setDeliveryMode(DeliveryMode.PERSISTENT);
+        connection.start();
 
         IntStream.range(0, 3).forEach(i -> {
             try {

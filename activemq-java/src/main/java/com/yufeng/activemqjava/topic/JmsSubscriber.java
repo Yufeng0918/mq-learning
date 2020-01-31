@@ -19,21 +19,36 @@ public class JmsSubscriber {
 
         ConnectionFactory connectionFactory = new ActiveMQSslConnectionFactory(ACTIVEMQ_URL);
         Connection connection = connectionFactory.createConnection();
-        connection.start();
+        connection.setClientID("durable-client-1");
+//        connection.start();
 
         Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
         Topic destination = session.createTopic(TOPIC_NAME);
-        MessageConsumer messageConsumer = session.createConsumer(destination);
+//        MessageConsumer messageConsumer = session.createConsumer(destination);
+//
+//        messageConsumer.setMessageListener(message -> {
+//            try {
+//                System.out.println(((TextMessage) message).getText());
+//            } catch (JMSException e) {
+//                e.printStackTrace();
+//            }
+//        });
 
-        messageConsumer.setMessageListener(message -> {
-            try {
-                System.out.println(((TextMessage) message).getText());
-            } catch (JMSException e) {
-                e.printStackTrace();
-            }
-        });
+
+        TopicSubscriber topicSubscriber = session.createDurableSubscriber(destination, "remark");
+        connection.start();
+
+        Message message = topicSubscriber.receive();
+        while (null != message) {
+            TextMessage textMessage = (TextMessage) message;
+            System.out.println("persist topic " + textMessage.getText());
+            message = topicSubscriber.receive(5000);
+        }
+
+
+
         System.in.read();
-        messageConsumer.close();
+//        messageConsumer.close();
         session.close();
         connection.close();
     }

@@ -107,3 +107,18 @@ MessageConsumer messageConsumer = session.createConsumer(destination);
             + BytesMessage
             + StreamMessage
             + ObjectMessage
+- Message Reliable
+    + Persist
+        + Queue
+            + setDeliveryMode(DeliveryMode.PERSISTENT | DeliveryMode.NON_PERSISTENT)
+            + PERSISTENT is default delivery mode 
+            + message will not be consume if MQ is down before consumer consume
+        + Topic
+            + subscriber 
+                + connnection.setClientId()
+                + TopicSubscriber receive() message
+            + subsriber register as durable subscriber, then down offline
+            + publisher publish message to subscriber
+            + subscriber back online will receive the message published before
+    + Transaction
+    + Acknowledgement
