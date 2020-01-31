@@ -39,15 +39,18 @@
 - Destination
     + created by session
     + Queue: point-to-point, sender & receiver
+        + one message only consume by one receiver
+        + message will be consume till receiver to receive message
     + Topic: publish-and-subscribe, publisher & subscriber
+        + one message will be sent to all subscriber
         + message will be thrown away if there is no subscriber
+        + may slow down if huge subscriber due to message copy
 - Producer
     + send(Message)
 - Consumer
     + receive(): block IO
     + receive(timeout): wait for timeout
     + setMessageListener(message -> {}): messageListener to listen the message
-    + mulit-Consumer are able to listen to one queue, but one message only be consumed once
 ```
 ConnectionFactory connectionFactory = new ActiveMQSslConnectionFactory(ACTIVEMQ_URL);
 Connection connection = connectionFactory.createConnection();
@@ -59,3 +62,32 @@ Queue destination = session.createQueue(QUEUE_NAME);
 MessageProducer messageProducer = session.createProducer(destination);
 MessageConsumer messageConsumer = session.createConsumer(destination);
 ```
+***
+
+
+## JMS
+#### J2EE 
+- 13 standard of enterprise development
+- JDBC
+- JNDI
+- EJB/RMI
+- JSP/Servlet
+- JMS, Java Message Service, async message oriented API
+- JTA
+- JavaMail
+#### JMS Product
+- ActiveMQ
+    + QPS, 10,000
+    + master-slave
+- RocketMQ
+    + QPS, n0,000
+    + master-slave
+- Kafka
+    + QPS, 100,000
+    + distributed
+    + may lose message or duplicated message
+#### JMS Component
+- Producer
+- Consumer
+- JMS Provider: MQ middleware
+- JMS Message
