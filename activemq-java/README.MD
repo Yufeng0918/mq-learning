@@ -91,3 +91,19 @@ MessageConsumer messageConsumer = session.createConsumer(destination);
 - Consumer
 - JMS Provider: MQ middleware
 - JMS Message
+    + Header
+        + JMS Destination
+        + JMS DeliveryMode: persist and non-persist
+        + JMS Expiration: default is never expire
+        + JMS Priority: 0 - 9, 0-4 standard, 5-9 is urgent
+        + JMS MessageID: universal Id created by JMS Provider
+    + Properties
+        + additional properties to enrich message metadata
+    + Body
+        + store message data
+        + category
+            + TextMessage: string
+            + MapMessage: map object
+            + BytesMessage
+            + StreamMessage
+            + ObjectMessage

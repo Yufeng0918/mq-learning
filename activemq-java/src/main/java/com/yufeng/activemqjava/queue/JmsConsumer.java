@@ -33,7 +33,12 @@ public class JmsConsumer {
 
         messageConsumer.setMessageListener(message -> {
             try {
-                System.out.println(((TextMessage) message).getText());
+                if (message instanceof TextMessage) {
+                    System.out.println(((TextMessage) message).getText() + ", isVip: " + message.getBooleanProperty("vip"));
+                } else if (message instanceof MapMessage) {
+                    System.out.println(((MapMessage) message).getString("K1"));
+                }
+
             } catch (JMSException e) {
                 e.printStackTrace();
             }

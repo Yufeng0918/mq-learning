@@ -28,7 +28,13 @@ public class JmsProducer {
         IntStream.range(0, 3).forEach(i -> {
             try {
                 TextMessage textMessage = session.createTextMessage("msg - " + i);
+                textMessage.setJMSDeliveryMode(DeliveryMode.PERSISTENT);
+                textMessage.setBooleanProperty("vip", Boolean.TRUE);
+
+                MapMessage mapMessage = session.createMapMessage();
+                mapMessage.setString("K1", "V1");
                 messageProducer.send(textMessage);
+                messageProducer.send(mapMessage);
             } catch (JMSException e) {
                 e.printStackTrace();
             }
