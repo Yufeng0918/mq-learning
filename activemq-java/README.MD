@@ -40,6 +40,7 @@
     + created by session
     + Queue: point-to-point, sender & receiver
     + Topic: publish-and-subscribe, publisher & subscriber
+        + message will be thrown away if there is no subscriber
 - Producer
     + send(Message)
 - Consumer
