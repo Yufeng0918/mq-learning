@@ -31,3 +31,12 @@
 #### Config
 - port: 61616
 - console: localhost:8161, e.g. admin/admin
+#### Java
+- ConnectionFactory
+    Connection
+        Session to create message
+- Message contains session to send/receive message to Destination
+- Destination
+    + created by session
+    + Queue: point-to-point, sender & receiver
+    + Topic: publish-and-subscribe, publisher & subscriber
