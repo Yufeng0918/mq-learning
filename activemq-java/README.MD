@@ -40,3 +40,21 @@
     + created by session
     + Queue: point-to-point, sender & receiver
     + Topic: publish-and-subscribe, publisher & subscriber
+- Producer
+    + send(Message)
+- Consumer
+    + receive(): block IO
+    + receive(timeout): wait for timeout
+    + setMessageListener(message -> {}): messageListener to listen the message
+    + mulit-Consumer are able to listen to one queue, but one message only be consumed once
+```
+ConnectionFactory connectionFactory = new ActiveMQSslConnectionFactory(ACTIVEMQ_URL);
+Connection connection = connectionFactory.createConnection();
+connection.start();
+
+Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
+Queue destination = session.createQueue(QUEUE_NAME);
+
+MessageProducer messageProducer = session.createProducer(destination);
+MessageConsumer messageConsumer = session.createConsumer(destination);
+```
