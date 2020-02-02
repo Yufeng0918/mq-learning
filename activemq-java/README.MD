@@ -121,4 +121,16 @@ MessageConsumer messageConsumer = session.createConsumer(destination);
             + publisher publish message to subscriber
             + subscriber back online will receive the message published before
     + Transaction
+        + Transaction
+            + open transaction: connection.createSession(true, Session.AUTO_ACKNOWLEDGE);
+            + commit transaction: session.commit();
+        + Producer: commit the message to mq after transaction commit
+        + Consumer: dequeue the message only after commit
     + Acknowledgement
+        + Non-Transaction
+            + AutoAck: default
+            + ClientAck: client invoke message.acknowledge() to ack
+            + DuplOkAct
+        + Transaction
+            + AutoAck once Consumer commit
+            + NoAct if Consumer does not commit
