@@ -21,8 +21,11 @@ repositories {
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-activemq'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework:spring-jms:4.3.23.RELEASE'
 	implementation 'org.apache.activemq:activemq-all:5.15.9'
+	implementation 'org.apache.activemq:activemq-pool:5.15.9'
 	implementation 'org.apache.xbean:xbean-spring:3.16'
+	implementation 'com.fasterxml.jackson.core:jackson-databind:2.10.0'
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
 	testImplementation('org.springframework.boot:spring-boot-starter-test') {

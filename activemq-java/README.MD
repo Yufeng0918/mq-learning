@@ -27,6 +27,7 @@
 ## ActiveMQ in action
 #### Commands
 - ./activemq start
+- ./activemq start xbean:file:<filePath>/activemq01.xml
 - ./activemq stop
 #### Config
 - port: 61616
@@ -134,3 +135,35 @@ MessageConsumer messageConsumer = session.createConsumer(destination);
         + Transaction
             + AutoAck once Consumer commit
             + NoAct if Consumer does not commit
+***
+
+
+## ActiveMQ Broker
+- instance of activeMQ instance
+- startup activeMQ inside java source code
+```
+BrokerService brokerService = new BrokerService();
+brokerService.setUseJmx(true);
+brokerService.addConnector("tcp://127.0.0.1:61616");
+brokerService.start();
+```
+
+## Springboot Integeration
+#### Producer Integration
+```
+@Autowired
+private JmsMessagingTemplate jmsMessagingTemplate;
+    public void produceMsg() {
+        jmsMessagingTemplate.convertAndSend(queue, "uuid: " + UUID.randomUUID().toString().substring(0, 8));
+    }
+}
+
+spring:
+  activemq:
+    broker-url: tcp://127.0.0.1:61616
+    user: admin
+    password: admin
+  jms:
+    pub-sub-domain: false #false = queue, true = topic
+```
+
