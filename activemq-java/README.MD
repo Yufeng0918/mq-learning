@@ -221,3 +221,36 @@ public class QueueConsumer {
 ```
 <transportConnector name="auto+nio" uri="auto+nio://0.0.0.0:61608?wireFormat.maxFrameSize=104857600"/>
 ```
+***
+
+## ActiveMQ Persist DataStorage
+#### Overview
+- message is persist even if activemq down
+- message created by producer, persist to storage first, message deleted from database if consumer successfully consume the message
+- activemq will check the offset of storage during the startup, re-send the un-delivery message
+- data persist external
+    + AMQ message store: persist message info file
+    + Kaha DB after 5.3
+    + JDBC + Juronal
+    + Replicated LevelDB Store introduced after 5.9
+#### Kaha DB
+- file based persistence data, defualt storage machanism after 5.4
+- contains transcation data log file and index file
+    + db-<i>.log: transaction data store in log, old file achived into achive directory
+    + db.data: B+ tree index file
+    + db.redo: used to restore db.log and db.data if shutdown unexpectally
+    + db.free: index for free space
+    + lock: read shared lock and write exclusive lock
+```
+<persistenceAdapter>
+    <kahaDB directory="${activemq.data}/kahadb"/>
+</persistenceAdapter>
+```
+#### Replicated LevelDB
+- file based persistence data, based on levelDB index after 5.8
+- integrated with zookeeper
+```
+<persistenceAdapter>
+    <levelDB directory="${activemq.data}/leveldb"/>
+</persistenceAdapter>
+```
