@@ -249,8 +249,32 @@ public class QueueConsumer {
 #### Replicated LevelDB
 - file based persistence data, based on levelDB index after 5.8
 - integrated with zookeeper
+#### JDBC
+- DeliveryMode must be persistence
+- copy mysql library into activemq/lib
+- Queue: msg will delete from ACTIVEMQ_MSGS once consumer consume message
+- Topic: publish msg will not be deleted
+- ACTIVEMQ_MSGS
+    + container: destination
+    + msgid_prod: producer
+    + msg_seq: msgid_prod + msg_seq = JMS Message ID
+    + msg: msg binary data
+- ACTIVEMQ_LOCK
+    + record master broker
+- ACTIVEMQ_ACKS: 
+    + container: destination
+    + client_id: subscriber id
 ```
 <persistenceAdapter>
-    <levelDB directory="${activemq.data}/leveldb"/>
+    # createTablesOnStartup to create table only first time
+    <jdbcPersistenceAdapter dataSource="#mysql-ds" createTablesOnStartup="true"/>
 </persistenceAdapter>
+
+<bean id="mysql-ds" class="org.apache.commons.dbcp2.BasicDataSource" destroy-method="close">
+    <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
+    <property name="url" value="jdbc:mysql://localhost/activemq?relaxAutoCommit=true"/>
+    <property name="username" value="root"/>
+    <property name="password" value="password"/>
+    <property name="poolPreparedStatements" value="true"/>
+</bean>
 ```

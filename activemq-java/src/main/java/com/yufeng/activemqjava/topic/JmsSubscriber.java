@@ -13,7 +13,7 @@ import java.io.IOException;
 public class JmsSubscriber {
 
     public static final String ACTIVEMQ_URL = "tcp://127.0.0.1:61616";
-    public static final String TOPIC_NAME = "topic01";
+    public static final String TOPIC_NAME = "persist-topic02";
 
     public static void main(String[] args) throws JMSException, IOException {
 
@@ -38,16 +38,18 @@ public class JmsSubscriber {
         TopicSubscriber topicSubscriber = session.createDurableSubscriber(destination, "remark");
         connection.start();
 
-        Message message = topicSubscriber.receive();
-        while (null != message) {
-            TextMessage textMessage = (TextMessage) message;
+
+        while (true) {
+            TextMessage textMessage = (TextMessage) topicSubscriber.receive();
             System.out.println("persist topic " + textMessage.getText());
-            message = topicSubscriber.receive(5000);
+            if (textMessage == null) {
+                break;
+            }
         }
 
 
 
-        System.in.read();
+//        System.in.read();
 //        messageConsumer.close();
         session.close();
         connection.close();
