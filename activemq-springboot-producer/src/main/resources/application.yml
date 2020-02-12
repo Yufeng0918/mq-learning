@@ -3,7 +3,7 @@ server:
 
 spring:
   activemq:
-    broker-url: tcp://127.0.0.1:61616
+    broker-url: tcp://127.0.0.1:61618
     user: admin
     password: admin
   jms:

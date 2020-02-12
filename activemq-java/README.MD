@@ -147,6 +147,7 @@ brokerService.setUseJmx(true);
 brokerService.addConnector("tcp://127.0.0.1:61616");
 brokerService.start();
 ```
+***
 
 ## Springboot Integeration
 #### Config
@@ -196,4 +197,27 @@ public class QueueConsumer {
         System.out.println("Received: " + message.getText());
     }
 }
+```
+***
+
+
+## Protocal
+#### Support Protocal
+- protocal type: ws, stomp, tcp, vm, mqtt, amqp e.g. NIO is recommended
+- amqp: advanced message queueing protocal
+- stop: stream text oriented protocal
+#### TCP && NIO
+- tcp
+    + default protocal, listen to 61616
+    + serialized via wire protocal
+    + tcp://0.0.0.0:616161?key=value to set parameters
+- nio
+    + provider better performance, nio + tcp to support connection
+    + nio to support different protocal via auto
+    + auto+nio://0.0.0.0:61612
+- config
+    + OpenWire, STOMP, AMQP, and MQTT can be automatically detected
+    + To configure ActiveMQ auto wire format detection over an NIO TCP connection use the auto+nio transport prefix
+```
+<transportConnector name="auto+nio" uri="auto+nio://0.0.0.0:61608?wireFormat.maxFrameSize=104857600"/>
 ```
