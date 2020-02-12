@@ -292,3 +292,7 @@ public class QueueConsumer {
 #### Components
 - zookeeper + replicated level db
 - master/slave cluster
+#### Zookeeper manage cluster
+- only one broker expose to outside as master, slave standby
+- slave does not allow client connection
+- if master down, the slave complete sync earliest become master, 3 node is recommended
