@@ -151,6 +151,19 @@ brokerService.start();
 ## Springboot Integeration
 #### Producer Integration
 ```
+@Component
+@EnableJms
+public class ConfigBean {
+
+    @Value("${myqueue}")
+    private String myqueue;
+
+    @Bean
+    public Queue queue() {
+        return new ActiveMQQueue(myqueue);
+    }
+}
+
 @Autowired
 private JmsMessagingTemplate jmsMessagingTemplate;
     public void produceMsg() {
@@ -165,5 +178,17 @@ spring:
     password: admin
   jms:
     pub-sub-domain: false #false = queue, true = topic
-```
 
+myqueue: boot-activemq-queue
+```
+#### Consumer Integration
+```
+@Service
+public class QueueConsumer {
+
+    @JmsListener(destination = "${myqueue}")
+    public void receive(TextMessage message) throws Exception{
+        System.out.println("Received: " + message.getText());
+    }
+}
+```
