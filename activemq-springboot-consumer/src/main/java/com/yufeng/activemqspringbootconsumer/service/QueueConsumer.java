@@ -14,8 +14,14 @@ import javax.jms.TextMessage;
 @Service
 public class QueueConsumer {
 
-    @JmsListener(destination = "${myqueue}")
-    public void receive(TextMessage message) throws Exception{
+//    @JmsListener(destination = "${myqueue}")
+    public void receiveQueueMsg(TextMessage message) throws Exception{
+        System.out.println("Received: " + message.getText());
+    }
+
+
+    @JmsListener(destination = "${mytopic}")
+    public void receiveTopicMsg(TextMessage message) throws Exception{
         System.out.println("Received: " + message.getText());
     }
 }

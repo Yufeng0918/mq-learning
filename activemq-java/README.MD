@@ -149,28 +149,8 @@ brokerService.start();
 ```
 
 ## Springboot Integeration
-#### Producer Integration
+#### Config
 ```
-@Component
-@EnableJms
-public class ConfigBean {
-
-    @Value("${myqueue}")
-    private String myqueue;
-
-    @Bean
-    public Queue queue() {
-        return new ActiveMQQueue(myqueue);
-    }
-}
-
-@Autowired
-private JmsMessagingTemplate jmsMessagingTemplate;
-    public void produceMsg() {
-        jmsMessagingTemplate.convertAndSend(queue, "uuid: " + UUID.randomUUID().toString().substring(0, 8));
-    }
-}
-
 spring:
   activemq:
     broker-url: tcp://127.0.0.1:61616
@@ -180,13 +160,38 @@ spring:
     pub-sub-domain: false #false = queue, true = topic
 
 myqueue: boot-activemq-queue
+mytopic: boot-activemq-topic
+
+@Component
+@EnableJms
+public class ConfigBean {
+
+    @Value("${myqueue}")
+    private String myqueue;
+    @Value("${mytopic}")
+    private String myTopic;
+
+    @Bean
+    public Queue queue() { return new ActiveMQQueue(myqueue);}
+    @Bean
+    private Topic topic() {return new ActiveMQTopic(myTopic);}
+}
+```
+#### Producer
+```
+@Autowired
+private JmsMessagingTemplate jmsMessagingTemplate;
+    public void produceMsg() {
+        jmsMessagingTemplate.convertAndSend(queue, "uuid: " + UUID.randomUUID().toString().substring(0, 8));
+    }
+}
 ```
 #### Consumer Integration
 ```
 @Service
 public class QueueConsumer {
 
-    @JmsListener(destination = "${myqueue}")
+    @JmsListener(destination = "${myqueue|mytopic}")
     public void receive(TextMessage message) throws Exception{
         System.out.println("Received: " + message.getText());
     }
