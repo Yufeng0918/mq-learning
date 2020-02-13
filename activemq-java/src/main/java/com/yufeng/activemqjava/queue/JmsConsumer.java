@@ -22,30 +22,30 @@ public class JmsConsumer {
         Connection connection = connectionFactory.createConnection();
         connection.start();
 
-        Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
+        Session session = connection.createSession(true, Session.AUTO_ACKNOWLEDGE);
         Queue destination = session.createQueue(QUEUE_NAME);
         MessageConsumer messageConsumer = session.createConsumer(destination);
 
-//        while (true) {
-//            TextMessage message = (TextMessage) messageConsumer.receive(4000);
-//            System.out.println("Received: " + message.getText());
-//        }
+        while (true) {
+            TextMessage message = (TextMessage) messageConsumer.receive(4000);
+            System.out.println("Received: " + message.getText());
+        }
 
-        messageConsumer.setMessageListener(message -> {
-            try {
-                if (message instanceof TextMessage) {
-                    System.out.println(((TextMessage) message).getText() + ", isVip: " + message.getBooleanProperty("vip"));
-                } else if (message instanceof MapMessage) {
-                    System.out.println(((MapMessage) message).getString("K1"));
-                }
-
-            } catch (JMSException e) {
-                e.printStackTrace();
-            }
-        });
-        System.in.read();
-        messageConsumer.close();
-        session.close();
-        connection.close();
+//        messageConsumer.setMessageListener(message -> {
+//            try {
+//                if (message instanceof TextMessage) {
+//                    System.out.println(((TextMessage) message).getText() + ", isVip: " + message.getBooleanProperty("vip"));
+//                } else if (message instanceof MapMessage) {
+//                    System.out.println(((MapMessage) message).getString("K1"));
+//                }
+//
+//            } catch (JMSException e) {
+//                e.printStackTrace();
+//            }
+//        });
+//        System.in.read();
+//        messageConsumer.close();
+//        session.close();
+//        connection.close();
     }
 }

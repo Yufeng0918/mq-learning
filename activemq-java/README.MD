@@ -287,6 +287,8 @@ public class QueueConsumer {
  <journalPersistenceAdapterFactory journalLogFiles="5" dataSource="#mysql-ds" useJournal="true" useQuickJournal="true"  dataDirectory="activemq-data" />
 </persistenceFactory>
 ```
+***
+
 
 ## ActiveMQ Cluseter
 #### Components
@@ -296,3 +298,56 @@ public class QueueConsumer {
 - only one broker expose to outside as master, slave standby
 - slave does not allow client connection
 - if master down, the slave complete sync earliest become master, 3 node is recommended
+***
+
+
+## Advance Features
+#### Aysc Send
+- sync mode
+    + declared sync mode
+    + no transaction send with persist mode, producer will block util broker ack
+- async mode
+    + default mode, allow low possibality to lose messasges
+    + "tcp://localhost:6161?jms.useAsyncSend=true"
+    + ((ActiveMQConnectionFactory)connectionFactory).setUseAsyncSend(true);
+    + set callback to handle the ack from broker
+```
+((ActiveMQMessageProducer)messageProducer).send(textMessage, new AsyncCallback() {
+        @Override
+        public void onSuccess() {}
+
+        @Override
+        public void onException(JMSException exception) {}
+});
+```
+#### Schedule Send
+- Support Functions
+    - AMQ_SCHEDULED_DELAY
+    - AMQ_SCHEDULED_PERIOD
+    - AMQ_SCHEDULED_REPEAT
+- Open broker schduelerSupport
+    - <broker xmlns="http://activemq.apache.org/schema/core" brokerName="localhost" dataDirectory="${activemq.data}" schedulerSupport="true">
+- Set message properties in messages
+```
+textMessage.setLongProperty(ScheduledMessage.AMQ_SCHEDULED_DELAY, delay);
+textMessage.setLongProperty(ScheduledMessage.AMQ_SCHEDULED_PERIOD, period);
+textMessage.setIntProperty(ScheduledMessage.AMQ_SCHEDULED_REPEAT, repeat);
+```
+#### Message Redelivery
+- Scenario
+    + client open transaction but rollback in session
+    + client open transaction but does not commit
+    + client CLIENT_ACKNOWLEDAGE, session invoke recover()
+- Redelivery Policy
+    + initinalRedliveryDelay: 1s
+    + maximumReliveries: 6s
+- Posison ACK
+    + once retry to max times, broker transfer message to dead queue
+#### Dead Letter Queue
+- SharedDeadLetterStrategy: default dead letter queue, shared by all the queue
+- IndividualDeadLetterStrategy: config queuePrefix = "DLQ"
+- Properties
+    - processExpired: set to false to discard expired message, not put into DLQ
+    - processNonPersistent: set to true, non persist message put into DLQ
+#### Avoid Duplicated Message Consumption
+- consumed record insert database or redis
