@@ -236,7 +236,7 @@ public class QueueConsumer {
 #### Kaha DB
 - file based persistence data, defualt storage machanism after 5.4
 - contains transcation data log file and index file
-    + db-<i>.log: transaction data store in log, old file achived into achive directory
+    + db-${i}.log: transaction data store in log, old file achived into achive directory
     + db.data: B+ tree index file
     + db.redo: used to restore db.log and db.data if shutdown unexpectally
     + db.free: index for free space
