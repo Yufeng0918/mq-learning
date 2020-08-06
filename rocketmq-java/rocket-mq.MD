@@ -375,3 +375,72 @@ RocketMQ 4.5版本之前，都是用Slave Broker同步数据，尽量保证数�
 在RocketMQ 4.5之后，因为RocketMQ支持了一种新的机制，叫做**Dledger**，基于Raft协议实现的一个机制。
 
 旦Master Broker宕机了，就可以在多个副本，也就是多个Slave中，**通过Dledger技术和Raft协议算法进行leader选举**，直接将一个Slave Broker选举为新的Master Broker，**然后这个新的Master Broker就可以对外提供服务了**。整个过程也许只要10秒或者几十秒的时间就可以完成。
+
+
+
+### 2.6 高可用生产架构
+
+#### NameServer集群化部署，保证高可用性
+
+![](./images/mq-27.png)
+
+首先第一步，我们要让NameServer集群化部署，我建议可以部署在三台机器上，这样可以充分保证NameServer作为路由中心的可用性，哪怕是挂掉两台机器，只要有一个NameServer还在运行，就能保证MQ系统的稳定性
+
+
+
+#### 基于Dledger的Broker主从架构部署
+
+![](./images/mq-28.png)
+
+Dledger技术是要求至少得是一个Master带两个Slave，这样有三个Broke组成一个Group，也就是作为一个分组来运行。一旦Master宕机，他就可以从剩余的两个Slave中选举出来一个新的Master对外提供服务。
+
+
+
+#### Broker跟NameServer进行通信
+
+![](./images/mq-29.png)
+
+Broker会每隔30秒发送心跳到所有的NameServer上去，然后每个NameServer都会每隔10s检查一次有没有哪个Broker超过120s没发送心跳的。Broker会跟每个NameServer都建立一个TCP长连接，然后定时通过TCP长连接发送心跳请求过去
+
+
+
+#### MQ的核心数据模型Topic
+
+MQ中的核心数据模型，Topic。在你的订单系统需要往MQ里发送订单消息，那么此时你就应该建一个Topic，他的名字可以叫做：topic_order_info，也就是一个包含了订单信息的数据集合。
+
+Topic其实就是一个数据集合的意思，不同类型的数据你得放不同的Topic里去。
+
+![](./images/mq-30.png)
+
+比如我们有一个订单Topic，可能订单系统每天都会往里面投递几百万条数据，然后这些数据在MQ集群上还得保留好多天，那么最终可能会有几千万的数据量，**这还只是一个Topic。那么如果有很多的Topic，并且里面都有大量的数据，最终加起来的总和也许是一个惊人的数字，此时这么大量的数据本身是不太可能存放在一台机器上的**。
+
+我们可以在创建Topic的时候指定让他里面的数据分散存储在多台Broker机器上，**比如一个Topic里有1000万条数据，此时有2台Broker，那么就可以让每台Broker上都放500万条数据。**
+
+
+
+#### 生产者发送消息给Broker
+
+生产者系统在发送消息之前，得先有一个Topic，然后在发送消息的时候你得指定你要发送到哪个Topic里面去。
+
+![](./images/mq-31.png)
+
+**跟NameServer建立一个TCP长连接，然后定时从他那里拉取到最新的路由信息**，包括集群里有哪些Broker，集群里有哪些Topic，每个Topic都存储在哪些Broker上。此时可以根据负载均衡算法，从里面选择一台Broke机器出来，比如round robine，hash算法。
+
+
+
+#### 消费者从Broker上拉取消息
+
+
+
+![](./images/mq-32.png)
+
+**消费者**系统其实跟生产者系统原理是类似的，**他们也会跟NameServer建立长连接，然后拉取路由信息**，接着找到自己要**获取消息的Topic在哪几台Broker上，就可以跟Broker建立长连接，从里面拉取消息了**
+
++ Broker随便挂了一台机器也不怕，挂了Slave对集群没太大影响，**挂了Master也会基于Dledger技术实现自动Slave切换为Master**
++ 生产者系统和消费者集群化部署的
++ **集群可以抗下高并发**，因为假设订单系统对订单Topic要发起**每秒10万QPS的写入**，那么只要订单Topic分散在比如5台Broker上，**实际上每个Broker会承载2万QPS写入**，也就是说高并发场景下的10万QPS可以分散到多台Broker上抗下来。
++ **集群足以存储海量消息**，因为所有**数据都是分布式存储的**，每个Topic的数据都是存储在多台Broker机器上的，用集群里多台Master Broker就足以存储海量的消息。
++ 多个Master Broker部署的方式，加上Topic分散在多台Broker上的机制，可以抗下高并发访问以及海量消息的分布式存储。然后每个Master Broker有两个Slave Broker结合Dledger技术可以实现故障时的自动Slave-Master切换，**实现高可用性。**
+
+最后，这套架构还具备伸缩性，就是说如果要抗更高的并发，存储跟多的数据，完全可以在集群里加入更多的Broker机器，这样就可以线性扩展集群了。
+
