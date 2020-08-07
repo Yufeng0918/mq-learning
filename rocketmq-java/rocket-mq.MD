@@ -913,76 +913,7 @@ sar -n DEV 1 2
 
 
 
-### 3.3 发送消息模式
-
-#### 同步发送
-
-```java
-SendResult sendResult = producer.send(msg)
-```
-
-
-
-#### 异步发送
-
-```java
-producer.setRetryTimesWhenSendAsyncFailed(0)
-  
-producer.send(message, new SendCallback()) {
-  	@Override
-  	public void onSuccess(SendResult sendResult) {}
-  	@Override
-  	public void onException(Throwable e) {}
-}
-```
-
-
-
-单项发送
-
-```java
-producer.sendOneway(msg)
-```
-
-
-
-### 3.4 消费消息模式
-
-#### Push消费模式
-
-就是Broker会主动把消息发送给你的消费者，你的消费者是被动的接收Broker推送给过来的消息，然后进行处理。这个就是所谓的Push模式，意思就是Broker主动推送消息给消费者。
-
-```java
-DefaultMQPushConsumer consuemr = new DefaultMQPushConsumer("credi_group");
-consumer.registerMessageListener(new MessageListenerConcurrently() {
-  @Override
-  public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs, ConsumeConcurrentlyContext context ) {
-    return ConsumerConcurrentlyStatus.CONSUME_SUCCESS;  
-  }
-})
-```
-
-
-
-#### Pull消费模式
-
-Broker不会主动推送消息给Consumer，而是消费者主动发送请求到Broker去拉取消息过来。
-
-```java
-DefaultMQPullConsumer consuemr = new DefaultMQPullConsumer("test_group");
-Set<MessageQueue> mqs = consumer.fetchSubscribeMessageQueue("topic_test1")
-for (MessageQueue mq: mqs) {
-   SINGLE_MQ:
-   while(true) {
-     PullResult pullResult = consumer.pullBlockIfNotFound(mq, null, getMessageQueueOffset(mq), 32);
-     putMessageQueueOffset(mq, pullResult.getNextBeginOffset());
-   }
-}
-```
-
-
-
-### 3.5 同步给大数据团队
+### 3.3 同步给大数据团队
 
 ![](./images/mq-44.png)
 
@@ -996,7 +927,7 @@ for (MessageQueue mq: mqs) {
 
 
 
-### 3.6 秒杀架构优化
+### 3.4 秒杀架构优化
 
 ![](./images/mq-46.png)
 
@@ -1085,3 +1016,182 @@ CDN你大致可以这么理解。比如我们公司的机房在上海，系统�
 + 瞬时生成的大量下单请求直接进入RocketMQ进行削峰，订单系统慢慢拉取消息完成下单操作
 
 ![](./images/mq-51.png)
+
+
+
+## 4. 原理深入
+
+### 4.1 发送消息模式
+
+#### 同步发送
+
+```java
+SendResult sendResult = producer.send(msg)
+```
+
+#### 异步发送
+
+```java
+producer.setRetryTimesWhenSendAsyncFailed(0)
+  
+producer.send(message, new SendCallback()) {
+  	@Override
+  	public void onSuccess(SendResult sendResult) {}
+  	@Override
+  	public void onException(Throwable e) {}
+}
+```
+
+#### 单项发送
+
+```java
+producer.sendOneway(msg)
+```
+
+
+
+### 4.2 消费消息模式
+
+#### Push消费模式
+
+就是Broker会主动把消息发送给你的消费者，你的消费者是被动的接收Broker推送给过来的消息，然后进行处理。这个就是所谓的Push模式，意思就是Broker主动推送消息给消费者。
+
+```java
+DefaultMQPushConsumer consuemr = new DefaultMQPushConsumer("credi_group");
+consumer.registerMessageListener(new MessageListenerConcurrently() {
+  @Override
+  public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs, ConsumeConcurrentlyContext context ) {
+    return ConsumerConcurrentlyStatus.CONSUME_SUCCESS;  
+  }
+})
+```
+
+#### Pull消费模式
+
+Broker不会主动推送消息给Consumer，而是消费者主动发送请求到Broker去拉取消息过来。
+
+```java
+DefaultMQPullConsumer consuemr = new DefaultMQPullConsumer("test_group");
+Set<MessageQueue> mqs = consumer.fetchSubscribeMessageQueue("topic_test1")
+for (MessageQueue mq: mqs) {
+   SINGLE_MQ:
+   while(true) {
+     PullResult pullResult = consumer.pullBlockIfNotFound(mq, null, getMessageQueueOffset(mq), 32);
+     putMessageQueueOffset(mq, pullResult.getNextBeginOffset());
+   }
+}
+```
+
+
+
+### 4.3 消息分片
+
+如果我们要使用RocketMQ，你先部署出来一套RocketMQ集群这个肯定是必须的，在有了集群之后，就必须根据你的业务需要去创建一些Topic。RocketMQ可视化工作台里去创建，在里面就可以创建一个Topic出来，**在创建Topic的时候需要指定一个很关键的参数，就是MessageQueue**。简单来说，就是你要指定你的这个Topic对应了多少个队列，也就是多少个MessageQueue。
+
+![](./images/mq-53.png)
+
+
+
+
+
+假设你的Topic有1万条数据，然后你的Topic有4个MessageQueue，那么大致可以认为会在每个MessageQueue中放入2500条数据。这个不是绝对的，有可能有的MessageQueue的数据多，有的数据少，这个要根据你的消息写入MessageQueue的策略来定。
+
+**4个MessageQueue平均分配了Topic的数据，这些MessageQueue放放在Broker上了！**
+
+也就是说，很有可能就是在**2个Broker上，每个Broker放两个MessageQueue**。
+
+
+
+![](./images/mq-54.png)
+
+生产者会跟NameServer进行通信获取Topic的路由数据。所以生产者从NameServer中就会知道，一个Topic有几个MessageQueue，哪些MessageQueue在哪台Broker机器上，哪些MesssageQueue在另外一台Broker机器上，这些都会知道。**现在暂时先认为生产者会均匀的把消息写入各个MessageQueue**
+
+![](./images/mq-55.png)
+
+如果某个Broker临时出现故障了，比如Master Broker挂了，此时正在等待的其他Slave Broker自动热切换为Master Broker，那么这个时候对这一组Broker就没有Master Broker可以写入了。**建议大家在Producer中开启一个开关，就是sendLatencyFaultEnable**
+
+一旦打开了这个开关，那么他会有一个自动容错机制，**比如如果某次访问一个Broker发现网络延迟有500ms，然后还无法访问，那么就会自动回避访问这个Broker一段时间，比如接下来3000ms内，就不会访问这个Broker了**。
+
+这样的话，就可以避免一个Broker故障之后，短时间内生产者频繁的发送消息到这个故障的Broker上去，出现较多次数的异常。而是在一个Broker故障之后，自动回避一段时间不要访问这个Broker，过段时间再去访问他。
+
+
+
+### 4.4 消息持久化
+
+首先第一步，他会把这个消息直接写入磁盘上的一个日志文件，叫做CommitLog，直接顺序写入这个文件。这个CommitLog是很多磁盘文件，每个文件限定最多1GB，Broker收到消息之后就直接追加写入这个文件的末尾，就跟上面的图里一样。如果一个CommitLog写满了1GB，就会创建一个新的CommitLog文件。
+
+![](./images/mq-56.png)
+
+
+
+其实在Broker中，对Topic下的每个MessageQueue都会有一系列的ConsumeQueue文件。就是在Broker的磁盘上，会有下面这种格式的一系列文件：**$HOME/store/consumequeue/{topic}/{queueId}/{fileName}**
+
+假如两个ConsumeQueue，分别叫做ConsumeQueue0和ConsumeQueue1，他们分别对应着Topic里的MessageQueue0和MessageQueue1。
+
+![](./images/mq-57.png)
+
+
+
+接着假设Queue的名字叫做：TopicOrderPaySuccess，那么此时在Broker磁盘上应该有如下两个路径的文件：
+
+```shell
+$HOME/store/consumequeue/TopicOrderPaySuccess/MessageQueue0/ConsumeQueue0
+$HOME/store/consumequeue/TopicOrderPaySuccess/MessageQueue1/ConsumeQueue1
+```
+
+当**Broker收到一条消息写入了CommitLog之后**，其实他同时会将这条消息在**CommitLog中的物理位置，也就是一个文件偏移量**，就是一个offset，写入到这条消息所属的**MessageQueue对应的ConsumeQueue**文件中去
+
+**实际上在ConsumeQueue中存储的每条数据不只是消息在CommitLog中的offset偏移量，还包含了消息的长度，以及tag hashcode**，一条数据是20个字节，每个ConsumeQueue文件保存30万条数据，大概每个文件是5.72MB。
+
+所以实际上**Topic的每个MessageQueue都对应了Broker机器上的多个ConsumeQueue文件，保存了这个MessageQueue的所有消息在CommitLog文件中的物理位置，也就是offset偏移量。**
+
+![](./images/mq-58.png)
+
+数据写入CommitLog文件的时候，其实不是直接写入底层的物理磁盘文件的，而是**先进入OS的PageCache内存缓存中**，然后后续由OS的后台线程选一个时间，**异步化的将OS PageCache内存缓冲中的数据刷入底层的磁盘文件。**
+
+
+
+#### 异步刷盘
+
+在上述的异步刷盘模式下，生产者把消息发送给Broker，Broker将消息写入OS PageCache中，就直接返回ACK给生产者了。如果生产者认为消息写入成功了，但是实际上那条消息此时是在Broker机器上的os cache中的，如果此时Broker直接宕机，那**么是不是os cache中的这条数据就会丢失了。**
+
+![](./images/mq-59.png)
+
+所以**异步刷盘的的策略下，可以让消息写入吞吐量非常高，但是可能会有数据丢失的风险**，这个是大家需要清除的。
+
+
+
+#### 同步刷盘
+
+同步刷盘，如果你使用同步刷盘模式的话，那么生产者发送一条消息出去，broker收到了消息，必须直接强制把这个消息刷入底层的物理磁盘文件中，然后才会返回ack给producer，此时你才知道消息写入成功了。
+
+![](./images/mq-60.png)
+
+**如果broker还没有来得及把数据同步刷入磁盘，然后他自己挂了，那么此时对producer来说会感知到消息发送失败了**，然后你只要不停的**重试发送**就可以了，直到有slave broker切换成master broker重新让你可以写入消息，此时可以保证数据是不会丢的。但是如果你强制每次消息写入都要直接进入磁盘中，**必然导致每条消息写入性能急剧下降，导致消息写入吞吐量急剧下降**，但是可以保证数据不会丢失。
+
+
+
+### 4.5 基于Dledger的主从同步 
+
+#### CommitLog
+
+![](./images/mq-61.png)
+
+DLedger技术实际上首先他自己就有一个CommitLog机制，你把数据交给他，他会写入CommitLog磁盘文件里去。所以首先我们在下面的图里可以看到，如果基于DLedger技术来实现Broker高可用架构，实际上就是用DLedger先替换掉原来Broker自己管理的CommitLog，由DLedger来管理CommitLog
+
+
+
+#### Raft协议选举Leader Broker
+
+实际上DLedger是**基于Raft协议来进行Leader Broker选举的**，这需要发起一轮一轮的投票，通过三台机器互相投票选出来一个人作为Leader。
+
+![](./images/mq-62.png)
+
+简单来说，三台Broker机器启动的时候，他们都会投票自己作为Leader，然后把这个投票发送给其他Broker。Broker01是投票给自己的，Broker02是投票给自己的，Broker03是投票给自己的，他们都把自己的投票发送给了别人。
+
++ 此时在第一轮选举中，Broker01会收到别人的投票，他发现自己是投票给自己，但是Broker02投票给Broker02自己，Broker03投票给Broker03自己，都在投票给自己，**所以第一轮选举是失败的。**
++ 接着每个人会进入一个随机时间的休眠，比如说Broker01休眠3秒，Broker02休眠5秒，Broker03休眠4秒。**此时Broker01必然是先苏醒过来的，他苏醒过来之后，直接会继续尝试投票给自己，并且发送自己的选票给别人。**
++ Broker03休眠4秒后苏醒过来**，他发现Broker01已经发送来了一个选票是投给Broker01自己的，此时他自己因为没投票，所以会尊重别人的选择，**就直接把票投给Broker01了**，同时把自己的投票发送给别人。**
++ **Broker02苏醒了，**他收到了Broker01投票给Broker01自己，收到了Broker03也投票给了Broker01，那么他此时自己是没投票**的，直接就会尊重别人的选择，**直接就投票给Broker01**，并且把自己的投票发送给别人。
+
+此时所有人都会收到三张投票，都是投给Broker01的，那么Broker01就会当选为Leader。其实只要有（3台机器 / 2） + 1个人投票给某个人，就会选举他**当Leader，这个（机器数量 / 2） + 1就是大多数的意思。**这就是**Raft协议中选举leader算法**的确保有人可以成为Leader的核心机制就是一轮选举不出来Leader的话，就让**大家随机休眠一下，先苏醒过来的人会投票给自己**，其他人苏醒过后发现自己收到选票了，就会直接投票给那个人。
