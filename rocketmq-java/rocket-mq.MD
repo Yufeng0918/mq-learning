@@ -1052,6 +1052,44 @@ producer.sendOneway(msg)
 
 ### 4.2 消费消息模式
 
+#### 消费组
+
+消费者组的意思，就是让你给一组消费者起一个名字。比如我们有一个Topic叫“TopicOrderPaySuccess”，然后假设有库存系统、积分系统、营销系统、仓储系统他们都要去消费这个Topic中的数据。
+
+![](./images/mq-63.png)
+
+正常情况下来说，这条消息进入Broker之后，库存系统和营销系统作为两个消费组，每个组都会拉取到这条消息。正常情况下来说，**库存系统的两台机器中只有一台机器会获取到这条消息，营销系统也是同理。**
+
+
+
+#### 集群模式
+
+个消费组获取到一条消息，只会交给组内的一台机器去处理，不是每台机器都可以获取到这条消息的。
+
+
+
+#### 广播模式
+
+```Java
+consumer.setMessageModel(MessageModel.BROADCASTING);
+```
+
+消费组获取到的一条消息，组内每台机器都可以获取到这条消息
+
+
+
+#### MessageQueue与消费组
+
+![](./images/mq-64.png)
+
+**Broker会均匀的将MessageQueue分配给消费组的多台机器来消费。**
+
+举个例子，假设我们的“TopicOrderPaySuccess”有4个MessageQueue，这4个MessageQueue分布在两个Master Broker上，每个Master Broker上有2个MessageQueue。然后库存系统作为一个消费组里有两台机器，那么正常情况下，当然最好的就是让这两台机器每个都负责2个MessageQueue的消费了
+
+比如库存系统的机器01从Master Broker01上消费2个MessageQueue，然后库存系统的机器02从Master Broker02上消费2个MessageQueue，
+
+
+
 #### Push消费模式
 
 就是Broker会主动把消息发送给你的消费者，你的消费者是被动的接收Broker推送给过来的消息，然后进行处理。这个就是所谓的Push模式，意思就是Broker主动推送消息给消费者。
@@ -1065,6 +1103,14 @@ consumer.registerMessageListener(new MessageListenerConcurrently() {
   }
 })
 ```
+
+Push消费模式本质底层也是基于这种消费者主动拉取的模式来实现的，只不过他的名字叫做Push而已，意思是Broker会尽可能实时的把新消息交给消费者机器来进行处理，**他的消息时效性会更好。**
+
+**当消费者发送请求到Broker去拉取消息的时候，如果有新的消息可以消费那么就会立马返回**一批消息到消费机器去处理，处理完之后会接着立刻发送**请求到Broker机器去拉取下一批消息**。所以消费机器在Push模式下会处理完一批消息，立马发起请求拉取下一批消息，消息处理的时效性非常好，看起来就跟Broker一直不停的推送消息到消费机器一样。
+
+Push模式下有一个请求挂起和长轮询的机制，当你的请求发送到Broker，**结果他发现没有新的消息给你处理的时候，就会让请求线程挂起，默认是挂起15秒，然后这个期间他会有后台线程每隔一会儿就去检查一下是否有的新的消息给你**，另外如果在这个挂起过程中，如果有新的消息到达了会主动唤醒挂起的线程，然后把消息返回给你。
+
+
 
 #### Pull消费模式
 
@@ -1081,6 +1127,28 @@ for (MessageQueue mq: mqs) {
    }
 }
 ```
+
+
+
+#### Broker读取需要消费的消息
+
+![](./images/mq-65.png)
+
+假设一个消费者机器发送了拉取请求到Broker了
+
++ 消费者说我这次要拉取MessageQueue0中的消息，然后我之前都没拉取过消息，所以就从这个MessageQueue0中的第一条消息开始拉取好了。
++ Broker就会找到MessageQueue0对应的ConsumeQueue0，从里面找到第一条消息的offset
++ Broker就需要根据ConsumeQueue0中找到的第一条消息的地址，去CommitLog中根据这个offset地址去读取出来这条消息的数据，然后把这条消息的数据返回给消费者机器
+
+
+
+#### ACK记录消费进度
+
+当处理完这批消息之后，消费者机器就会提交我们目前的一个消费进度到Broker上去，然后Broker就会存储我们的消费进度
+
+![](./images/mq-66.png)
+
+比如我们现在对ConsumeQueue0的消费进度假设就是在offset=1的位置，那么他会记录下来一个ConsumeOffset的东西去标记我们的消费进度
 
 
 
@@ -1179,11 +1247,17 @@ $HOME/store/consumequeue/TopicOrderPaySuccess/MessageQueue1/ConsumeQueue1
 
 DLedger技术实际上首先他自己就有一个CommitLog机制，你把数据交给他，他会写入CommitLog磁盘文件里去。所以首先我们在下面的图里可以看到，如果基于DLedger技术来实现Broker高可用架构，实际上就是用DLedger先替换掉原来Broker自己管理的CommitLog，由DLedger来管理CommitLog
 
+Leader Broker上的DLedger在收到一个消息，**将uncommitted消息写入自己本地存储之后，还需要基于Raft协议的算法，去采用两阶段的方式把uncommitted消息同步给其他Follower Broker**。**必须要超过一半的Follower Broker的DLedger对uncommitted消息返回ack**，此时Leader Broker才能返回ACK给生产者，说这次写入成功了。
+
+实际上在这里只要有超过半数的Follower Broker都写入uncommitted消息之后，就可以返回给生产者了。因此哪怕此时Leader Broker宕机了，**超过半数的Follower Broker上也是有这个消息的，只不过是uncommitted状态，但是新选举的Leader Broker可以根据剩余Follower Broker上这个消息的状态去进行数据恢复，比如把消息状态调整为committed。**
+
+**这样的一个架构对每次写入都平添了一个成本，每次写入都必须有超过半数的Follower Broker都写入消息才可以算做一次写入成功**
+
 
 
 #### Raft协议选举Leader Broker
 
-实际上DLedger是**基于Raft协议来进行Leader Broker选举的**，这需要发起一轮一轮的投票，通过三台机器互相投票选出来一个人作为Leader。
+实际上**DLedger是基于Raft协议来进行Leader Broker选举的**，这需要发起一轮一轮的投票，通过三台机器互相投票选出来一个人作为Leader。
 
 ![](./images/mq-62.png)
 
@@ -1195,3 +1269,624 @@ DLedger技术实际上首先他自己就有一个CommitLog机制，你把数据�
 + **Broker02苏醒了，**他收到了Broker01投票给Broker01自己，收到了Broker03也投票给了Broker01，那么他此时自己是没投票**的，直接就会尊重别人的选择，**直接就投票给Broker01**，并且把自己的投票发送给别人。
 
 此时所有人都会收到三张投票，都是投给Broker01的，那么Broker01就会当选为Leader。其实只要有（3台机器 / 2） + 1个人投票给某个人，就会选举他**当Leader，这个（机器数量 / 2） + 1就是大多数的意思。**这就是**Raft协议中选举leader算法**的确保有人可以成为Leader的核心机制就是一轮选举不出来Leader的话，就让**大家随机休眠一下，先苏醒过来的人会投票给自己**，其他人苏醒过后发现自己收到选票了，就会直接投票给那个人。
+
+
+
+### 4.6 基于Netty扩展出高性能网络架构
+
+#### Reactor主线程
+
+首先，作为Broker而言，他会有一个Reactor主线程。而且这个线程是负责监听一个网络端口的，比如监听个2888，39150这样的端口。
+
+
+
+#### Producer和Broker建立长连接
+
+![](./images/mq-68.png)
+
+Reactor主线程就专门会负责跟这个Producer按照TCP协议规定的一系列步骤和规范，建立好一个长连接。
+但是现在问题来了，在Broker里用什么东西代表跟Producer之间建立的这个长连接呢？
+
+Producer里面会有一个SocketChannel，Broker里也会有一个SocketChannel，这两个SocketChannel就代表了他们俩建立好的这个
+长连接。
+
+
+
+#### Reactor线程池监听SocketChannel请求
+
+![](./images/mq-69.png)
+
+然后Reactor主线程建立好的每个连接SocketChannel，都会交给这个Reactor线程池里的其中一个线程去监听请求。Reactor线程池这个概念，**Producer发送请求**过来了，他**发送一个消息过来到达Broker里的SocketChannel**，此时**Reactor线程池里的一个线程会监听到这个SocketChannel中有请求到达了！**
+
+
+
+#### Worker线程池完成预处理
+
+![](./images/mq-70.png)
+
+
+
+那么现在如果Worker线程完成了一系列的预处理之后，比如SSL加密验证、编码解码、连接空闲检查、网络连接管理，等等，接着就需
+要对这个请求进行正式的业务处理了！我们来给大家举个例子。
+
+
+
+#### 业务线程池处理业务
+
+![](./images/mq-67.png)
+
+写入CommitLog文件的，后续还有一些ConsumeQueue之类的事情需要处理，类似这种操作，就是业务处理逻辑。
+
+比如对于处理发送消息请求而言，就会把请求**转交给SendMessage线程池**，而且如果大家还有一点点印象的话，其实在之前讲集群部
+署的时候，我们讲到过这个SendMessage线程是可以配置的，你配置的越多，自然处理消息的吞吐量越高。
+
+我们看下面的图，就是引入了一个业务线程池的概念。
+
+#### 总结
+
++ Reactor主线程在端口上监听Producer建立连接的请求，建立长连接
++ Reactor线程池并发的监听多个连接的请求是否到达
++ Worker请求并发的对多个请求进行预处理
++ 业务线程池并发的对多个请求进行磁盘读写业务操作
+
+
+
+### 4.7 mmap内存映射实现磁盘文件的高性能读写
+
+Broker对磁盘文件的写入主要是借助直接写入os cache来实现性能优化的，因为直接写入os cache，相当于就是写入内存一样的性能，后续等os内核中的线程异步把cache中的数据刷入磁盘文件即可。
+
+#### 传统读写
+
+首先从磁盘上把数据读取到内核IO缓冲区里去，然后再从内核IO缓存区里读取到用户进程私有空间里去，然后我们才能拿返回到这个文件里。所以这个就是普通的IO操作的一个弊端，必然涉及到两次数据拷贝操作，对磁盘读写性能是有影响的。
+
+![](./images/mq-71.png)
+
+
+
+那么一些数据写入到磁盘文件里去，必须先把数据写入到用户进程私有空间里去，然后从这里再进入内核IO缓冲区，最后进入磁盘文件里去
+
+
+
+#### RocketMQ如何利用mmap技术配合page cache
+
+首先，RocketMQ底层对CommitLog、ConsumeQueue之类的磁盘文件的读写操作，基本上都会采用mmap技术来实现。
+
+如果具体到代码层面，就是基于JDK NIO包下的**MappedByteBuffer的map()**函数，来先将一个磁盘文件映射到内存里来
+
+**只不过他把物理上的磁盘文件的一些地址和用户进程私有空间的一些虚拟内存地址进行了一个映射**
+
+![](./images/mq-72.png)
+
+这个地址映射的过程，就是JDK NIO包下的MappedByteBuffer.map()函数干的事情，底层就是基于mmap技术实现的。
+另外这里给大家说明白的一点是，这个mmap技术在进行文件映射的时候，**一般有大小限制，在1.5GB~2GB之间**
+
+所以RocketMQ才让CommitLog单个文件在1GB，ConsumeQueue文件在5.72MB，不会太大。这样限制了RocketMQ底层文件的大小，就可以在进行文件读写的时候，很方便的进行内存映射了。
+
+![](./images/mq-74.png)
+
+
+
+接下来就可以对这个已经映射到内存里的磁盘文件进行读写操作了，比如要写入消息到CommitLog文件，你先把一个**CommitLog文件通过MappedByteBuffer的map()函数映射其地址到你的虚拟内存地址。接着就可以对这个MappedByteBuffer执行写入操作**了，写入的时候他会**直接进入PageCache**中，然后过一段时间之后，**由os的线程异步刷入磁盘中**，如下图我们可以看到这个示意。
+
+接着如果我们要从磁盘文件里读取数据，那么此时就会判断一下，当前你要读取的数据是否在PageCache里。如果在的话，就可以直接从PageCache里读取了！比如刚写入CommitLog的数据还在PageCache里，此时你Consumer来消费肯定是从PageCache里读取数据的。但是如果PageCache里没有你要的数据，那么此时就会从磁盘文件里加载数据到PageCache中去。
+
+#### 总结
+
++ 写磁盘文件的时候都是进入PageCache的，保证写入高性能；同时尽可能多的通过map
+
++ madvise的映射后预热机制，把磁盘文件里的数据尽可能多的加载到PageCache里来，后续对CosumeQueue、CommitLog进行读
+取的时候，才能尽可能从内存里读取数据。
+
+![](./images/mq-75.png)
+
+
+
+## 5. 生产实践
+
+### 5.1 消息丢失
+
+#### 生产者丢失消息
+
+订单系统在接收到订单支付成功的通知之后，必然会去推送一条订单支付成功的消息到MQ的，那么在这个过程中，会出现丢失消息的问题。
+
++ 比如订单系统在推送消息到RocketMQ的过程中，是通过网络去进行传输的，但是这个时候恰巧可能网络发生了抖动，也就是网络突然有点问题，导致这次网络通信失败了。
+
++ 写消息到RocketMQ的过程中，刚好遇到了某个Leader Broker自身故障，其他的Follower Broker正在尝试切换为Leader Broker，这个过程中也可能会有异常。类似的问题可能还有其他的。
+
+![](./images/mq-76.png)
+
+**不一定你发送消息出去就一定会成功，有可能就会失败**，此时你的代码里可能会抛出异常，也可能不会抛出异常，这都不好说，具体要看到底什么原因导致的消息推送失败。
+
+
+
+#### Broker丢失消息
+
+![](./images/mq-77.png)
+
+假如要是出现了Broker机器的崩溃，机器一旦宕机，os cache内存中的数据就没了。
+
+![](./images/mq-78.png)
+
+假设现在我们写入MQ的一条消息已经稳稳进入Broker所在机器的磁盘文件里了，因为如果你的磁盘出现故障，比如磁盘坏了，你上面存储的数据还是会丢失。
+
+
+
+#### 消费者丢失消息
+
+![](./images/mq-79.png)
+
+设红包系统已经获取到了消息1了，然后消息1此时就在他的内存里，正准备运行代码去派发现金红包呢，但是要注意，此时还没派发现金红包
+
+![](./images/mq-80.png)
+
+**MQ的消费者有可能会自动提交已经消费的offset**，那么如果此时你还没处理这个消息派发红包的情况下，MQ的消费者可能直接自动给你提交这个消息1的offset到broker去了，标识为你已经成功处理了这个消息。突然故障了，红包系统的机器重启了一下，然后此时内存里的消息1必然就丢失了，而且红包也没发出去
+
+
+
+### 5.2 事务机制 - 生产者
+
+#### 事务流程
+
+在RocketMQ中，有一个非常强悍有力的功能，就是事务消息的功能，凭借这个事务级的消息机制，就可以让我们确保订单系统推送给 出去的消息一定会成功写入MQ里，绝对不会半路就搞丢了。
+
+![](./images/mq-81.png)
+
+
+
++ 在基于RocketMQ的事务消息机制中，我们首先要让订单系统去发**送一条half消息到MQ去**，这个half消息本质就是一个订单支付成功
+  的消息，只不过你可以理解为他这个消息的状态是half状态，**这个时候红包系统是看不见这个half消息的**
+
+  在这里我们首先第一件事，不是先让订单系统做一些增删改操作，而是先发一个half消息给MQ以及收到他的成功的响应，初步
+  先跟MQ做个联系和沟通。如果half消息都没发送成功，**这个时候你的订单系统就应该执行一系列的回滚操作**，比如对订单状态做一个更新，**让状态变成“关闭交易”**，同时通知支付系统自动进行退款。
+
+![](./images/mq-82.png)
+
++ half消息写成功了，这个时候你的订单系统就应该在自己本地的数据库里执行一些增删改操作了，因为一旦half消息写成功了，就说明MQ肯定已经收到这条消息了，MQ还活着，而且目前你是可以跟MQ正常沟通的。比如订单系统的数据库当时也有网络异常，或者数据库挂了，直接就是让订单系统发送一个rollback请求给MQ就可以了。这个意思就是说，**你可以把之前我发给你的half**
+  **消息给删除掉了，因为我自己这里都出问题了**，已经无力跟你继续后续的流程了。
+
+![](./images/mq-83.png)
+
++ **如果订单系统成功完成了本地的事务操作**，比如把订单状态都更新为“已完成”了，此时你就可以发送一个commit请求给MQ，要求
+  **让MQ对之前的half消息进行commit操作**，让红包系统可以看见这个订单支付成功消息
+
+
+
+#### HALF消息的补偿机制
+
+**如果我们把half消息发送给MQ了，MQ给保存下来了，但是MQ返回给我们的响应我们没收到**。这个时候我们没收到响应，可能就会网络超时报错，也可能直接有其他的异常错误，这个时候订单系统会误以为是发送half消息到MQ失败了，订单系统就直接会执行退款流程了，订单状态也会标记为“已关闭”。**其实RocketMQ这里有一个补偿流程，他会去扫描自己处于half状态的消息，如果我们一直没有对这个消息执行commit/rollback操**
+
+![](./images/mq-84.png)
+
+系统就得去查一下数据库，看看这个订单当前的状态，一下发现订单状态是“已关闭”，此时就知道，你必然得发送rollback请求给
+MQ去删除之前那个half消息了！
+
+
+
+如果订单系统是收到了half消息写入成功的响应了，同时尝试对自己的数据库更新了，然后根据失败或者**成功去执行了rollback或者commit请求，发送给MQ了，结果因为网络故障，导致rollback或者commit请求发送失败**了呢。这个时候其实也很简单，因为MQ里的消息一直是half状态，所以说他过了一定的超时时间会发现这个half消息有问题，他会回调你的
+订单系统的接口
+
+![](./images/mq-85.png)
+
+
+
+
+
+你此时要判断一下，这个订单的状态如果更新为了“已完成”，那你就得再次执行commit请求，反之则再次执行rollback请求。本质这个MQ的回调就是一个补偿机制，如果你的half消息响应没收到，或者rollback、commit请求没发送成功，他都会来找你问问对
+
+**通过这套事务消息的机制，是不是就可以保证我们的订单系统一旦成功执行了数据库操作，就一定会通知到红包系统去派发红包**。至少订单系统到MQ之间的消息传输是不会有丢失的问题了！
+
+
+
+#### 重试机制的缺陷
+
+**同步发送消息 + 反复重试的方案**，也可以做到保证消息一定可以投递到MQ中。确实如此，而且在基于Kafka作为消息中间件的消息零丢失方案中，对于发送消息这块，因为Kafka本身不具备RocketMQ这种事务消息的高级功能，所以一般我们都是对Kafka会采用同步发消息 + 反复重试多次的方案，去保证消息成功投递到Kafka的。
+
+```java
+@Transactional
+public void payOrderSuccess() {
+	try {
+	 		orderService.finishOrderPay();
+	 		producer.sendMessage();
+	} catch (Exception e) {
+			for(int i = 0; i < 3; i++) { 
+				//retry
+			}
+			throw new Exception();
+	}
+} 
+```
+
+OrderService.finishOrderPay()，但是其实也仅仅执行了一些增删改SQL语句，还没提交订单本地事务。
+
+如果发送MQ消息失败了，而且多次重试还不奏效，则我们抛出异常会自动回滚订单本地事务；如果你刚执行 orderService.finishOrderPay()，结果订单系统直接崩溃了，此时订单本地事务会回滚，因为根本没提交过。
+
+但是对于这个方案，还是非常的不理想，原因就出在那个MQ多次重试的地方。假设用户支付成功了，然后支付系统回调通知你的订单系统说，有一笔订单已经支付成功了**，这个时候你的订单系统卡在多次重试MQ的代码那里，可能耗时了好几秒种**，此时回调通知你的系统早就等不及可能都超时异常了。**而且你把重试MQ的代码放在这个逻辑里，可能会导致订单系统的这个接口性能很差**
+
+
+
+```java
+@Transactional
+public void payOrderSuccess() {
+	try {
+	 		orderService.finishOrderPay();
+    	orderService.updateRedis();
+    	orderService.updateEsData();
+	 		producer.sendMessage();
+	} catch (Exception e) {
+			for(int i = 0; i < 3; i++) { 
+				//retry
+			}
+			throw new Exception();
+	}
+} 
+```
+
+然订单数据库的操作会回滚，但是Redis、Elasticsearch中的数据不会的回滚。因为他们根本没法自动回滚，此时数据还是会不一致的。所以说，完全寄希望于本地事务自动回滚是不现实的。
+
+
+
+#### 代码实践
+
+```java
+import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
+import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyContext;
+import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
+import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
+import org.apache.rocketmq.common.message.MessageExt;
+import java.util.List;
+
+public class TransactionProducer {
+    public static void main(String[] args) throws MQClientException, InterruptedException {
+        //接受RocketMQ的回调接口，会实现本地事务的commit和rollback方法
+        TransactionListener transactionListener = new TransactionListenerImpl();
+        
+        //指定生产者分组
+        TransactionMQProducer producer = new TransactionMQProducer("TestProducerGroup");
+        ExecutorService executorService = new ThreadPoolExecutor(2, 5, 100, TimeUnit.SECONDS, new ArrayBlockingQueue<Runnable>(2000), new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                Thread thread = new Thread(r);
+                thread.setName("client-transaction-msg-check-thread");
+                return thread;
+            }
+        });
+
+        producer.setExecutorService(executorService);
+        //给生产者设置回调函数
+        producer.setTransactionListener(transactionListener);
+        producer.start();
+				Message msg = new Message("TopicTest1234", tags[i % tags.length], "KEY" + i,
+                      ("支付消息").getBytes(RemotingHelper.DEFAULT_CHARSET));
+       try {
+        	SendResult sendResult = producer.sendMessageInTransaction(msg, null);
+        	System.out.printf("%s%n", sendResult);
+			} catch (MQClientException | UnsupportedEncodingException e) {
+         //half消息发送失败，关闭订单并触发退款
+         e.printStackTrace();
+      }
+    }
+}
+
+
+
+
+public class TransactionListenerImpl implements TransactionListener {
+    private AtomicInteger transactionIndex = new AtomicInteger(0);
+
+    private ConcurrentHashMap<String, Integer> localTrans = new ConcurrentHashMap<>();
+
+  	//如果half消息发送成功，就会回调这个函数，可以执行本地事务
+    @Override
+    public LocalTransactionState executeLocalTransaction(Message msg, Object arg) {
+        try {
+        		//本地事务执行成功，返回commit
+          	return LocalTransactionState.COMMIT_MESSAGE;
+        } catch(Exceptio e) {
+          	//本地事务执行失败，返回rollback
+          	return LocalTransactionState.ROLLBACK_MESSAGE;
+        }
+        
+    }
+
+  
+   //如果因为各种原因没有返回commit或者rollback
+    @Override
+    public LocalTransactionState checkLocalTransaction(MessageExt msg) {
+        //查询本地事务
+        Integer status = localTrans.get(msg.getTransactionId());
+        // 根据本地事务执行commit或者rollback
+        if (null != status) {
+            switch (status) {
+                case 0:
+                    return LocalTransactionState.UNKNOW;
+                case 1:
+                    return LocalTransactionState.COMMIT_MESSAGE;
+                case 2:
+                    return LocalTransactionState.ROLLBACK_MESSAGE;
+            }
+        }
+        return LocalTransactionState.COMMIT_MESSAGE;
+    }
+}
+```
+
+
+
+### 5.3 同步刷盘 + Raft协议主从同步 - Broker
+
+![](./images/mq-86.png)
+
+一定要确保数据零丢失的话，可以调整MQ的刷盘策略，我们需要调整broker的配置文件，将其中的flushDiskType配置设置为：**SYNC_FLUSH**，默认他的值是ASYNC_FLUSH，即默认是异步刷盘的。如果调整为同步刷盘之后，我们写入MQ的每条消息，只要MQ告诉我们写入成功了，那么他们就是已经进入了磁盘文件了！
+
+只要采用了**主从架构的Broker集群**，那么一条消息写入成功，就**意味着多个Broker机器都写入了**，此时任何一台机器的磁盘故障，数据也是不会丢失的。
+
+
+
+### 5.4 手动提交offset - 消费者
+
+```java
+consumer.registerMessageListener(
+  new MessageListenerConcurrently() {
+    @Override
+    public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs, 
+    ConsumeConcurrentlyContext context ) {
+        return ConsumerConcurrentlyStatus.CONSUME_SUCCESS;  
+    }
+  }
+);
+```
+
+**RocketMQ的消费者中会注册一个监听器**，就是上面小块代码中的MessageListenerConcurrently这个东西，当你的消费者获取到一批消息之后，就会回调你的这个监听器函数，让你来处理这一批消息。然后当你处理完毕之后，你才会返**ConsumeConcurrentlyStatus.CONSUME_SUCCESS**作为消费成功的示意，告诉RocketMQ，这批消息我已经处理完毕了。所以对于RocketMQ而言，其实只要你的红包系统是在这个监听器的函数中先处理一批消息，基于这批消息都派发完了红包，**然后返回了那个消费成功的状态，接着才会去提交这批消息的offset到broker去。**
+
+**注意：不能开启线程池去异步消费消息**
+
+
+
+### 5.5 RocketMQ 设计的全链路消息零丢失方案总结
+
+**生产者零丢失**：事务机制
+
+**MQ零丢失****：开启同步刷盘策略 + 主从架构同步机制，只要让一个Broker**。收到消息之后同步写入磁盘，同时同步复制给其他Broker，然后再返回响应给生产者说写入成功，此时就可以保证MQ自己不会弄丢消息消费消息的零丢。
+
+**消费者零丢失**：采用RocketMQ的消费者天然就可以保证你处理完消息之后，才会提交消息的offset到broker去，只要记住别采用多线程异步处理消息的方式即可
+
+
+
+一般我们建议，对于跟金钱、交易以及核心数据相关的系统和核心链路，可以上**这套消息零丢失方案**。比如支付系统，他是绝对不能丢失任何一条消息的，**你的性能可以低一些，但是不能有任何一笔支付记录丢失。**
+
+比如订单系统，公司一般是不能轻易丢失一个订单的，毕竟一个订单就对应一笔交易，如果订单丢失，用户还支付成功了，你轻则要给用户赔付损失，重则弄不好要经受官司，特别是一些B2B领域的电商，一笔线上交易可能多大几万几十万。所**以对这种非常非常核心的场景和少数几条核心链路，才会建议大家上这套复杂的消息0丢失方案。**
+
+而对于其他大部分没那么核心的场景和系统，其实即使丢失一些数据，也不会导致太大的问题，此时可以不采取这些方案，或者说你可以在其他的场景里做一些简化。或者你把broker的刷盘策略改为异步刷盘，但是上一套主从架构，即使一台机器挂了，os cache里的数据丢失了，但是其他机器上还有数据。但是大部分时候broker不会随便宕机，那么异步刷盘策略下性能还是很高的。
+
+
+
+### 5.6 消息重复消费
+
+#### 重复消费发生场景
+
+![](./images/mq-87.png)
+
+假设你的优惠券系统拿到了一条订单成功支付的消息，然后都已经进行处理了，也就是说都已经对这个订单给你发了一张优惠券了，本来我们之前讲过，这个时候他应该返回一个CONSUME_SUCCESS的状态，然后提交消费进度offset到broker的。但是不巧的是，你刚刚发完优惠券，还没来得及提交消息offset到broker呢！优惠券系统就进行了一次重启！比如可能优惠券系统的代码更新了，需要重启进行重新部署。
+
+**所以其实你重启优惠券系统的时候，可能有一批消息刚处理完，还没来得及提交offset给broker呢，然后你重启之后就会再一次重复处理这批消息**，这种情况可能是家常便饭！
+
+
+
+#### 解决方案
+
++ 第一个方案就是业务判断法，也就是说你的订单系统必须要知道自己到底是否发送过消息到MQ去，消息到底是否已经在MQ里了。我们举个例子，当支付系统重试调用你的订单系统的接口时，你需要发送一个请求到MQ去，查询一下当前MQ里是否存在针对这个订单的支付消息。
+
+  **如果MQ告诉你，针对id=1100这个订单的支付成功消息**，在我这里已经有了，你之前已经写入进来了，那么订单系统就可以不要再次发送这条消息到MQ去了，我们看下图的示意。
+
++ 第二种方法，就是状态判断法。这个方法的核心在于，你需要引入一个Redis缓存来存储你是否发送过消息的状态，如果你成功发送了一个消息到MQ里去，**你得在Redis缓存里写一条数据，标记这个消息已经发送过， 第二种方法不推荐**
+
+
+
+### 5.7 重试队列和死信队列
+
+实际上如果我们因为数据库宕机等问题，对这批消息的处理是异常的，此时没法处理这批消息，我们就应该返回一个**RECONSUME_LATER**状态。他的意思是，我现在没法完成这批消息的处理，麻烦你稍后过段时间再次给我这批消息让我重新试一下！
+
+```java
+consumer.registerMessageListener(
+  new MessageListenerConcurrently() {
+    @Override
+    public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs, 
+    ConsumeConcurrentlyContext context ) {
+      	try {
+           // 处理订单消息，增发积分，发送优惠券
+           return ConsumerConcurrentlyStatus.CONSUME_SUCCESS;  
+        } catch (Exception e) {
+          // 如果消费失败，返回重试
+           return ConsumerConcurrentlyStatus.CONSUME_LATER;  
+        }
+    }
+  }
+);
+```
+
+认最多是重试16次！每次重试之间的间隔时间是不一样的，这个间隔时间可以如下进行配置：
+
+```properties
+messageDelayLevel=1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h
+```
+
+试了16次还一直没处理成功，就不要继续重试这批消息了，你就认为他们死掉了就可以了。然后这批消息会自动进入死信队列。死信队列的名字是“%DLQ%VoucherConsumerGroup”，我们其实在RocketMQ的管理后台上都是可以看到的。
+
+
+
+### 5.8 消息乱序
+
+属于同一个订单的binlog进入了不同的MessageQueue，进而导致一个订单的binlog被不同机器上的Consumer来获取和处理，那么如果是这样的话，必然会导致这一个订单的binlog会乱序执行。
+
+#### 解决方案
+
+##### 同一个订单进入一个MessageQueue
+
+**让一个订单的binlog进入到一个MessageQueue里去。完全可以根据订单id来进行判断**，我们可以往MQ里发送binlog的时候，根据订单id来判断一下，如果订单id相同，你必须保证他进入同一个MessageQueue。那么他可能有2个binlog，对这两个binlog，我们必须要用订单id=1100对MessageQueue的数量进行取模，比如MessageQueue一共有15个，那么此时订单id=1100对15取模，就是5。也就是说，凡是订单id=1100的binlog，都应该进入位置为5的MessageQueue中去！
+
+![](./images/mq-89.png)
+
+
+
+##### 有序获取binlog
+
+**从MySQL数据库中获取他的binlog的时候，此时也必须是按照binlog的顺序来获取的**，也就是说比如Canal作为一个中间件从MySQL那里监听和获取binlog，那么当binlog传输到Canal的时候，也必然是有先后顺序的，先是insert binlog，然后是update binlog
+
+
+
+##### Consumer有序处理一个订单的binlog
+
+一个Consumer可以处理多个MessageQueue的消息，但是一个MessageQueue只能交给一个Consumer来进行处理，所以一个订单的binlog只会有序的交给一个Consumer来进行处理！
+
+
+
+##### 不能重试
+
+因为如果你的consumer获取到订单的一个insert binlog，结果处理失败了，**此时返回了RECONSUME_LATER，那么这条消息会进入重试队列**，过一会儿才会交给你重试。**但是此时broker会直接把下一条消息，也就是这个订单的update binlog交给你来处理**，此时万一你执行成功了，就根本没有数据可以更新！又会出现消息乱序的问题。
+
+所以对于有序消息的方案中，如果你遇到消息处理失败的场景，就必须返回**SUSPEND_CURRENT_QUEUE_A_MOMENT**这个状态，意思是先等一会儿，一会儿再继续处理这批消息，而不能把这批消息放入重试队列去，然后直接处理下一批消息。
+
+
+
+#### 代码实践
+
+让一个订单binlog进入一个MessageQueue
+
+```java
+SendResult sendResult = producer.send(
+	message,
+	new MessageQueueSelector() {
+		@Override
+		public MessageQueue select(List<MessageQueue> mqs, Message msg, Object arg) {
+			Long orderId = arg;
+			Long idx = id % msq.size();
+			return mqs.get((int)index);
+		}
+	}
+);
+```
+
+消费者按顺序读取MessageQueue中的消息
+
+```java
+consumer.registerMessageListener(
+  new MessageListenerOrderly() {
+    @Override
+    public ConsumeConcurrentlyStatus consumeMessage(List<MessageExt> msgs, 
+    ConsumeConcurrentlyContext context ) {
+      	try {
+           for(MessageExt msg: msgs) {}
+           return ConsumerConcurrentlyStatus.CONSUME_SUCCESS;  
+        } catch (Exception e) {
+          // 如果消费失败，返回重试
+           return ConsumerConcurrentlyStatus.SUSPEND_CURRENT_QUEUE_A_MOMENT;  
+        }
+    }
+  }
+);
+```
+
+
+
+### 5.9 消息过滤
+
+在发送消息的时候，可以给消息设**置tag和属性**
+
+```java
+Message msg = new Message("TopicTest1234", "TableA", ("binlog").getBytes(RemotingHelper.DEFAULT_CHARSET));
+msg.putUserProperty("a", 10)
+```
+
+根据属性消费, 我们只要tag=TableA和tag=TableB的数据
+
+```java
+consumer.subscribte("TopicTest1234", "TableA || TableB");
+consumer.subscribte("TopicTest1234", MessageSelector.bySql(""));
+```
+
+RocketMQ还是支持比较丰富的数据过滤语法的
+
++ 数值比较，比如：>，>=，<，<=，BETWEEN，=；
++ 字符比较，比如：=，<>，IN；
++ IS NULL 或者 IS NOT NULL；
++ 逻辑符号 AND，OR，NOT；
++ 数值，比如：123，3.1415；
++ 字符，比如：'abc'，必须用单引号包裹起来；
++ NULL，特殊的常量
++ 布尔值，TRUE 或 FALSE
+
+
+
+### 5.10 延迟队列
+
+#### 扫描未支付订单
+
+一般订单系统都必须设置一个规则，当一个订单下单之后，超过比如30分钟没有支付，那么就必须订单系统自动关闭这个订单，后续你如果要购买这个订单里的商品，就得重新下订单了。
+
+可能你的订单系统就需要有一个后台线程，不停的扫描订单数据库里所有的未支付状态的订单，看他如果超过30分钟了还没支付，那么就**必须自动把订单状态 更新为“已关闭”**。因为假设你的订单数据量特别的多，然后你要是打算用多台机器部署订单扫描服务，但是每台机器扫描哪些订单？怎么扫描？什么时候扫描？这都是一系列的麻烦问题。
+
+**延迟消息**，意思就是说，我们订单系统在创建了一个订单之后，可以发送一条消息到MQ里去，我们指定这条消息是延迟消息，**比如要等待30分钟之后，才能被订单扫描服务给消费到**
+
+
+
+#### 代码实现
+
+```java
+ Message message = new Message("TestTopic", ("Hello scheduled message " + i).getBytes());
+ // This message will be delivered to consumer 10 seconds later.
+ message.setDelayTimeLevel(3);
+ // Send the message
+ producer.send(message);
+```
+
+**RocketMQ默认支持一些延迟级别如下：1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h**
+
+所以上面代码中设置延迟级别为3，意思就是延迟10s，你发送出去的消息，会过10s被消费者获取到。那么如果是订单延迟扫描场景，可以设置延迟级别为16，也就是对应上面的30分钟。
+
+
+
+### 5.11 生产经验总结
+
+#### 灵活的运用 tags来过滤数据
+
+之前我们讲解过基于tags来过滤数据的功能，其实在真正的生产项目中，建议大家合理的规划Topic和里面的tags，一个Topic代表了一类业务消息数据，然后对于这类业务消息数据，如果你希望继续划分一些类别的话，可以在发送消息的时候设置tags。
+
+
+
+#### 基于消息key来定位消息是否丢失
+
+之前我们给大家讲过，在消息0丢失方案中，可能要解决的是消息是否丢失的问题，那么如果消息真的丢失了，我们要排查。
+
+**可以基于消息key来实现，比如通过下面的方式设置一个消息的key为订单id：message.setKeys(orderId)**，这样这个消息就具备一个key了。接着这个消息到broker上，会基于key构建hash索引，这个hash索引就存放在IndexFile索引文件里。
+
+然后后续我们可以通过MQ提供的命令去根据key查询这个消息，类似下面这样：
+
+```
+mqadmin queryMsgByKey -n 127.0.0.1:9876 -t SCANRECORD -k orderId
+```
+
+
+
+#### 消息零丢失方案的补充
+
+其实在消息零丢失方案中还有一个问题，那就是MQ集群彻底故障了，其实对于一些金融级的系统，或者跟钱相关的支付系统，或者是广告系统，类似这样的系统，都必须有超高级别的高可用保障机制。
+
+一般假设MQ集群彻底崩溃了，你生产者就应该把消息写入到本地磁盘文件里去进行持久化，或者是写入数据库里去暂存起来，等待MQ恢复之后，然后再把持久化的消息继续投递到MQ里去。
+
+
+
+#### 提高消费者的吞吐量
+
+你的Topic的MessageQueue得是有对应的增加，因为如果你的consumer机器有5台，然后MessageQueue只有4个，那么意味着有一个consumer机器是获取不到消息的。
+
+然后就是可以增加consumer的线程数量，可以设置consumer端的参数：**consumeThreadMin、consumeThreadMax**，这样一台consumer机器上的消费线程越多，消费的速度就越快。
+
+此外，还可以开启消费者的**批量消费功能，就是设置consumeMessageBatchMaxSize参数**，他默认是1，但是你可以设置的多一些，那么一次就会交给你的回调函数一批消息给你来处理了，此时你可以通过SQL语句一次性批量处理一些数据，通过批量处理消息的方式，也可以大幅度提升消息消费的速度。
+
+
+
+#### 要不要消费历史消息
+
+其实consumer是支持设置从哪里开始消费消息的，常见的有两种：一个是从Topic的第一条数据开始消费，一个是从最后一次消费过的消息之后开始消费。对应的是：CONSUME_FROM_LAST_OFFSET，CONSUME_FROM_FIRST_OFFSET
+
+**一般来说，我们都会选择CONSUME_FROM_FIRST_OFFSET**，这样你刚开始就从Topic的第一条消息开始消费，**但是以后每次重启，你都是从上一次消费到的位置继续往后进行消费的。**
