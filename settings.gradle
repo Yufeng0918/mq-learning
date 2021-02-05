@@ -1,3 +1,4 @@
 rootProject.name = 'mq-learning'
 include 'rocketmq-java'
+include 'rabbitmq-java'
 
