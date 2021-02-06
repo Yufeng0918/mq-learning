@@ -1,4 +1,4 @@
-package com.yufeng.rabbitmq.fanout;
+package com.yufeng.rabbitmq.exchange.topic;
 
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Connection;
@@ -7,15 +7,15 @@ import com.yufeng.rabbitmq.utils.RabbitMqUtils;
 
 import java.io.IOException;
 
-public class FanoutSubscriber {
+public class Subscriber2 {
 
     public static void main(String[] args) throws IOException {
         Connection connection = RabbitMqUtils.getConnection();
         Channel channel = connection.createChannel();
 
-        channel.exchangeDeclare("logs", "fanout");
+        channel.exchangeDeclare("topics", "topic");
         String queueName = channel.queueDeclare().getQueue();
-        channel.queueBind(queueName, "logs", "");
+        channel.queueBind(queueName, "topics", "user.delete");
 
         DeliverCallback deliverCallback = (consumerTag, delivery) -> {
             String message = new String(delivery.getBody(), "UTF-8");

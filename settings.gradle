@@ -1,4 +1,6 @@
 rootProject.name = 'mq-learning'
 include 'rocketmq-java'
 include 'rabbitmq-java'
+include 'rabbitmq-springboot-producer'
+include 'rabbitmq-springboot-consumer'
 

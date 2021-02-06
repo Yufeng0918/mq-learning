@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: springboot_rabbitmq
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /ems
+    listener:
+      simple:
+        acknowledge-mode: manual
+      direct:
+        acknowledge-mode: manual
